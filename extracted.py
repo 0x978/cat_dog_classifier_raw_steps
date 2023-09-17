@@ -11,7 +11,7 @@ path = untar_data(URLs.PETS) / 'images'
 def is_cat(x): return x[0].isupper()
 
 
-dogsAndCats = (path).ls().sorted()
+dogsAndCats = get_image_files(path)
 
 validation_set_percentage = 0.20
 num_of_validation = int(len(dogsAndCats) * validation_set_percentage)
@@ -112,9 +112,68 @@ def validate_epoch(model):
     accs = [batch_accuracy(model(xb), yb) for xb,yb in valid_dl]
     return round(torch.stack(accs).mean().item(), 4)
 
-# Lets train our model
+# Lets declare our lR to be 1 and initialise params.
 lr = 1.
 params = weights,bias
-for i in range(20):
-    train_epoch(linear1, lr, params)
-    print(validate_epoch(linear1), end=' ')
+
+# Okay this didn't work lets try something new.
+# Recall our learning function `linear1` and our param initialiser `init_params`
+# We can replace this with the following
+
+linear_model = nn.Linear((192*192)*3,1)
+
+# Lets define a basic optimiser
+
+class BasicOptim:
+    def __init__(self,params,lr):
+        self.params,self.lr = list(params),lr
+
+    def step(self, *args, **kwargs): # Take step, adjusting params for gradients and learning rate
+        for p in self.params:
+            p.data -= p.grad.data * self.lr
+
+    def zero_grad(self, *args, **kwargs):
+        for p in self.params: # Reset gradients of params after each step
+            p.grad = None
+
+# Lets create the optimiser now
+opt = BasicOptim(linear_model.parameters(),lr)
+
+# Earlier we defined `train_epoch`, which would update params, but now this is handled by `opt` so lets simplify it
+def train_epoch(model):
+    for xb,yb in dl:
+        calc_grad(xb, yb, model)
+        opt.step()
+        opt.zero_grad()
+
+
+# We can now define `train_model` as follows
+def train_model(model, epochs):
+    for i in range(epochs):
+        train_epoch(model)
+        print(validate_epoch(model), end=' ')
+
+# However we can still make this simpler
+# our `basicOptim` can be entirely replaced by the `SGD` class in PyTorch
+# Thus we can fully define with the following.
+
+linear_model = nn.Linear((192*192)*3,1)
+opt = SGD(linear_model.parameters(), lr)
+
+# train_model is also redundant, fastAI provides learner.fit
+# We're gonna need a dataloader
+dls = DataLoaders(dl,valid_dl)
+
+# Lets now add a non-linearity
+complex_net = nn.Sequential(
+    nn.Linear((192*192)*3, 64),  # Adding a linear layer with 64 units
+    nn.ReLU(),
+    nn.Linear(64, 64),           # Another one with 64 units
+    nn.ReLU(),
+    nn.Linear(64, 32),           # And another with 32 units
+    nn.ReLU(),
+    nn.Linear(32, 1)             # Finally, your output layer
+)
+learn = Learner(dls, complex_net, opt_func=SGD,
+                loss_func=loss_f, metrics=batch_accuracy)
+learn.fit(20,1)
